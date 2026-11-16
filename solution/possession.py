@@ -86,7 +86,7 @@ def load_features(refresh=False):
     return bx, by, dist, pitch, np.zeros(len(bx), dtype=bool)
 
 
-def emissions(bx, by, dist, pitch, setp, k=0.15, far=6.0, d_bias=-2.5, clip=10.0, sp=0.0):
+def emissions(bx, by, dist, pitch, setp, k=0.15, far=6.0, d_bias=-2.5, clip=10.0, sp=0.0, tau=0.0):
     """(n, 3) log-likelihood-ish scores for H, A, D. Zeros where the ball is invisible."""
     length, width = pitch
     n = len(bx)
@@ -98,6 +98,12 @@ def emissions(bx, by, dist, pitch, setp, k=0.15, far=6.0, d_bias=-2.5, clip=10.0
     margin = np.where(visible, np.clip(da - dh, -clip, clip), 0.0)  # >0: home player is closer
     em[:, H] = np.where(visible, -np.logaddexp(0, -k * margin), 0.0)
     em[:, A] = np.where(visible, -np.logaddexp(0, k * margin), 0.0)
+
+    if tau > 0:  # ball in flight (nobody close): the nearest player says little about who has it
+        near = np.minimum(dist[:, H], dist[:, A])
+        weight = 1.0 / (1.0 + (np.where(np.isfinite(near), near, 99.0) / tau) ** 2)
+        em[:, H] *= weight
+        em[:, A] *= weight
 
     outside = visible & ((bx < 0) | (bx > length) | (by < 0) | (by > width))
     isolated = visible & (np.minimum(dist[:, H], dist[:, A]) > far)
@@ -138,16 +144,17 @@ def write_submission(path, labels):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--k", type=float, default=0.15)
+    parser.add_argument("--k", type=float, default=0.3)
     parser.add_argument("--switch", type=float, default=25.0)
     parser.add_argument("--dead", type=float, default=8.0)
     parser.add_argument("--sp", type=float, default=0.5, help="D bonus inside set-piece tags")
+    parser.add_argument("--tau", type=float, default=3.0, help="distance scale that down-weights far-ball frames")
     parser.add_argument("--refresh", action="store_true", help="re-read the raw tracking")
     parser.add_argument("--name", default="hmm_v1")
     args = parser.parse_args()
 
     bx, by, dist, pitch, setp = load_features(args.refresh)
-    path = viterbi(emissions(bx, by, dist, pitch, setp, k=args.k, sp=args.sp), args.switch, args.dead)
+    path = viterbi(emissions(bx, by, dist, pitch, setp, k=args.k, sp=args.sp, tau=args.tau), args.switch, args.dead)
     labels = LABELS[path]
     out = os.path.join(ROOT, "evaluation", "results", args.name + ".csv")
     write_submission(out, labels)
