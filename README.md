@@ -161,6 +161,19 @@ The notebooks additionally want `kloppy` and `matplotlib` (`requirements-starter
 
 ---
 
+## Reproducing our submission
+
+```bash
+pip install -r requirements-lock.txt
+python -m jupyter nbconvert --to notebook --execute solution/preprocessing.ipynb --output-dir %TEMP%
+python run.py          # writes submission/submission.csv and validates it
+```
+
+The preprocessing notebook writes `data/processed/features_tactical.csv` (private, git-ignored);
+`run.py` decodes possession from it with a Viterbi HMM (`solution/possession.py`).
+
+---
+
 ## Timeline
 
 | |                |
