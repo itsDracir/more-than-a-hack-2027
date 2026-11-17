@@ -1,0 +1,89 @@
+"""Which team has the ball, inside stretches already known to be in play.
+
+Input is the per-frame distance from the ball to the nearest home and nearest away player -- what
+the preprocessing produces (home_nearest_m / away_nearest_m, NaN where the ball is not seen).
+
+Two steps:
+
+1. **Viterbi** over {home, away} with a cost per change of possession. A deflection or a lost
+   duel gives the other team a few frames of evidence, not enough to pay for two switches, so it
+   does not split the possession. A real interception gives sustained evidence and does.
+2. **Move each change to the new team's first touch.** Between the old team's last touch and
+   the new team's first one, the ball is loose or in the air and the evidence is indifferent, so
+   Viterbi may put the change anywhere in that gap. The ground truth gives the ball to the new
+   team when it gains control -- loose balls stay with the last team (CHALLENGE.md) -- so the
+   change goes at the first touch. One second late costs a third of spellF1 (EVALUATION.md).
+
+Frames where the ball is not tracked carry no evidence and simply continue the current
+possession, which is what an occlusion inside a possession should do.
+"""
+
+import numpy as np
+
+from solution.params import Params
+from solution.viterbi import viterbi
+
+HOME, AWAY, NONE = 0, 1, -1
+
+
+def team_evidence(home_nearest_m, away_nearest_m, params=None):
+    """Per-frame evidence that the home team (positive) or away team (negative) is on the ball.
+
+    Strong only when someone is actually close to the ball: weighted by exp(-closest / r).
+    A team with no tracked player near the ball is treated as infinitely far.
+    """
+    p = params or Params()
+    home = np.where(np.isfinite(home_nearest_m), home_nearest_m, np.inf)
+    away = np.where(np.isfinite(away_nearest_m), away_nearest_m, np.inf)
+    with np.errstate(invalid="ignore"):
+        closest = np.minimum(home, away)
+        margin = np.clip(away - home, -10.0, 10.0)          # inf - inf -> NaN -> no evidence
+        evidence = np.exp(-closest / p.control_radius_m) * np.tanh(margin / p.margin_scale_m)
+    evidence[~np.isfinite(evidence)] = 0.0
+    return evidence + 0.0
+
+
+def runs_of(mask):
+    """[(start, stop)] half-open runs where `mask` is True."""
+    edges = np.diff(np.concatenate(([0], np.asarray(mask, dtype=np.int8), [0])))
+    return list(zip(np.flatnonzero(edges == 1).tolist(), np.flatnonzero(edges == -1).tolist()))
+
+
+def _touches(evidence, team, threshold):
+    return evidence > threshold if team == HOME else evidence < -threshold
+
+
+def move_changes_to_first_touch(path, evidence, threshold):
+    """Shift each change of team to the new team's first touch after the old team's last one."""
+    out = path.copy()
+    changes = (np.flatnonzero(path[1:] != path[:-1]) + 1).tolist()
+    bounds = [0] + changes + [len(path)]
+    for i, change in enumerate(changes):
+        old, new = int(path[change - 1]), int(path[change])
+        previous_change, next_change = bounds[i], bounds[i + 2]
+        old_touches = np.flatnonzero(_touches(evidence[previous_change:change], old, threshold))
+        last_old = previous_change + int(old_touches[-1]) if len(old_touches) else previous_change
+        new_touches = np.flatnonzero(_touches(evidence[last_old + 1:next_change], new, threshold))
+        if not len(new_touches):
+            continue
+        first_new = last_old + 1 + int(new_touches[0])
+        if first_new > change:
+            out[change:first_new] = old
+        else:
+            out[first_new:change] = new
+    return out
+
+
+def segment_teams(evidence, alive, params=None):
+    """Team code per frame: HOME / AWAY inside alive runs, NONE on dead frames and on alive runs
+    that never see the ball (the scorer forward-fills those; guessing would only add noise)."""
+    p = params or Params()
+    evidence = np.asarray(evidence, dtype=float)
+    codes = np.full(len(evidence), NONE, dtype=np.int8)
+    for start, stop in runs_of(alive):
+        run = evidence[start:stop]
+        if not np.any(run != 0):
+            continue
+        path = viterbi(np.column_stack([run / 2.0, -run / 2.0]), p.team_switch_cost)
+        codes[start:stop] = move_changes_to_first_touch(path, run, p.touch_evidence)
+    return codes
