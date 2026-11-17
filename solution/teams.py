@@ -43,6 +43,58 @@ def team_evidence(home_nearest_m, away_nearest_m, params=None):
     return evidence + 0.0
 
 
+def tactical_team_evidence(features, params=None):
+    """Small, bounded tactical reinforcement; never possession by itself.
+
+    Use offensive tags only when *independent tracking evidence* already
+    supports the same team with sufficient strength. In particular:
+
+    - if the ball is missing, tactical evidence is zero;
+    - if tracking supports the opposite team, tactical evidence is zero;
+    - for each continuous tag interval, the total bonus is capped at a
+      quarter of the cost of a possession change.
+
+    Consequently, a long tactical tag cannot manufacture a possession
+    switch in a stretch without visible ball/player proximity information.
+    No parameters are fitted using the public ground-truth fragment.
+    """
+    p = params or Params()
+    n = len(features)
+    codes = ("build_up", "progression", "attacking_transition", "creating_chances")
+    home = np.zeros(n, dtype=bool)
+    away = np.zeros(n, dtype=bool)
+    for code in codes:
+        for team, accum in (("H", home), ("A", away)):
+            name = f"tag_{code}_{team}"
+            if name in features.columns:
+                accum |= features[name].fillna(0).to_numpy(dtype=float) > 0
+
+    # Si els dos equips tenen tags al mateix frame, no prenem partit.
+    direction = (home & ~away).astype(np.int8) - (away & ~home).astype(np.int8)
+    result = np.zeros(n, dtype=float)
+    if p.tactical_team_weight <= 0 or not np.any(direction):
+        return result
+
+    observed = team_evidence(features["home_nearest_m"].to_numpy(dtype=float),
+                             features["away_nearest_m"].to_numpy(dtype=float), p)
+    # Una etiqueta només reforça una proximitat significativa del mateix equip.
+    confirmed = ((direction != 0) & (observed * direction >= p.touch_evidence))
+    result[confirmed] = (direction[confirmed] *
+                         np.minimum(float(p.tactical_team_weight),
+                                    0.25 * np.abs(observed[confirmed])))
+
+    # Una etiqueta que dura minuts no es pot acumular indefinidament.
+    # El pressupost és per cada interval ininterromput d'un mateix signe.
+    budget = max(0.0, 0.25 * float(p.team_switch_cost))
+    for side in (-1, 1):
+        for first, stop in runs_of(direction == side):
+            total = float(np.abs(result[first:stop]).sum())
+            if total > budget and total > 0:
+                result[first:stop] *= budget / total
+
+    return result
+
+
 def runs_of(mask):
     """[(start, stop)] half-open runs where `mask` is True."""
     edges = np.diff(np.concatenate(([0], np.asarray(mask, dtype=np.int8), [0])))

@@ -57,3 +57,7 @@ class Params:
     # When moving a change of possession to the new team's first touch, a frame counts as a
     # touch when its evidence is at least this strong.
     touch_evidence: float = 0.2
+    # Evidència suau de les etiquetes ofensives de Smart Tagging ja preprocessades (H - A).
+    # No utilitzem etiquetes defensives ni considerem que un tag sigui ground truth.
+    #tactical_team_weight: float = 0.04
+    tactical_team_weight: float = 0.04

@@ -52,32 +52,100 @@ def ball_speed_mps(x, y, pitch, fps):
 
 
 def ball_moving(x, y, pitch, fps, window_s=1.0, min_m=2.0):
-    """True where the ball, seen inside the pitch now and `window_s` ago, travelled > min_m."""
+    """Detect motion by *distance travelled*, not just net displacement.
+
+    The old implementation missed a ball that travelled and returned to its
+    starting point. Here we sum valid consecutive steps over the window.
+    Small steps (below 4 cm) are ignored to reduce tracker jitter; jumps
+    suggesting over 45 m/s are discarded as potential tracking glitches.
+
+    We require at least 70% valid consecutive steps and the ball visible
+    inside the pitch at the current frame. Missing tracking alone is NEVER
+    taken as evidence of a stoppage.
+
+    These thresholds are physical heuristics, not fitted to ground truth.
+    """
     length, width = pitch
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
+    if x.shape != y.shape or x.ndim != 1:
+        raise ValueError("x i y han de ser vectors de la mateixa longitud")
+    if fps <= 0:
+        raise ValueError("fps ha de ser positiu")
+
+    n = len(x)
     lag = max(1, int(round(window_s * fps)))
-    moving = np.zeros(len(x), dtype=bool)
-    if len(x) <= lag:
+    moving = np.zeros(n, dtype=bool)
+    if n <= lag:
         return moving
+
     with np.errstate(invalid="ignore"):
-        inside = (x >= 0) & (x <= 1) & (y >= 0) & (y <= 1)
-        distance = np.hypot((x[lag:] - x[:-lag]) * length, (y[lag:] - y[:-lag]) * width)
-        moving[lag:] = inside[lag:] & inside[:-lag] & (distance > min_m)
+        inside = (np.isfinite(x) & np.isfinite(y) &
+                  (x >= 0) & (x <= 1) & (y >= 0) & (y <= 1))
+        steps = np.hypot(np.diff(x) * length, np.diff(y) * width)
+        valid = (inside[:-1] & inside[1:] & np.isfinite(steps) &
+                 (steps * fps <= 45.0))
+
+    # La distancia d'un pas només compta si és plausible i prou gran
+    # per no confondre oscil·lacions minúscules amb moviment real.
+    travelled_steps = np.where(valid & (steps >= 0.04), steps, 0.0)
+    distance_sum = np.r_[0.0, np.cumsum(travelled_steps)]
+    valid_sum = np.r_[0, np.cumsum(valid.astype(np.int64))]
+
+    travelled_window = distance_sum[lag:] - distance_sum[:-lag]
+    valid_fraction = (valid_sum[lag:] - valid_sum[:-lag]) / lag
+    moving[lag:] = (inside[lag:] & (valid_fraction >= 0.70) &
+                    (travelled_window > min_m))
     return moving
 
 
 def detect_restart(ball_speed, start, end, kick_speed=3.0, n_frames=3):
-    """First frame in [start, end) where the ball moves faster than `kick_speed` for `n_frames`
-    frames running -- the kick that restarts play. None if the window has no such frame."""
-    start, end = max(0, int(start)), min(len(ball_speed), int(end))
+    """Find a credible restart within [start, end), or return None.
+
+    A restart requires a change from a recently *observed stationary ball*
+    to sustained fast motion. Merely finding three fast frames is not enough:
+    the ball could have been moving before the Smart Tagging interval began.
+
+    Require three consecutive low-speed measurements (<= 1 m/s, or a third
+    of kick_speed if lower) in a short look-back, with the last measured speed
+    before the kick also low. This is deliberately conservative: if the ball
+    is missing around the restart, return None rather than invent the kick.
+    """
+    values = np.asarray(ball_speed, dtype=float)
+    start, end = max(0, int(start)), min(len(values), int(end))
+    n_frames = int(n_frames)
+    if n_frames < 1:
+        raise ValueError("n_frames ha de ser com a mínim 1")
     if end - start < n_frames:
         return None
-    with np.errstate(invalid="ignore"):
-        fast = (np.nan_to_num(ball_speed[start:end], nan=0.0) > kick_speed).astype(int)
-    running = np.convolve(fast, np.ones(n_frames, dtype=int), mode="valid")
-    hits = np.flatnonzero(running == n_frames)
-    return start + int(hits[0]) if len(hits) else None
+
+    finite = np.isfinite(values)
+    fast = finite & (values > kick_speed)
+    calm = finite & (values <= min(1.0, kick_speed / 3.0))
+    min_calm = max(3, n_frames)
+    lookback = max(10, 4 * min_calm)
+
+    for frame in range(start, end - n_frames + 1):
+        if not np.all(fast[frame:frame + n_frames]):
+            continue
+        # No és un inici de moviment si ja anava ràpid abans del candidat.
+        if frame > 0 and fast[frame - 1]:
+            continue
+        prior_start = max(0, frame - lookback)
+        recent_calm = calm[prior_start:frame]
+        if len(recent_calm) < min_calm:
+            continue
+        # Una ratxa lenta abans de la puntada, no un únic frame sorollós.
+        stable = np.convolve(recent_calm.astype(int),
+                             np.ones(min_calm, dtype=int), mode="valid")
+        if not np.any(stable == min_calm):
+            continue
+        # La darrera velocitat observada abans de la puntada ha de ser baixa.
+        previous_valid = np.flatnonzero(finite[prior_start:frame])
+        if not len(previous_valid) or not recent_calm[previous_valid[-1]]:
+            continue
+        return frame
+    return None
 
 
 def dead_evidence(speed_smooth, threshold, x, y, pitch, params=None, moving=None):
@@ -116,7 +184,7 @@ def _is_kickoff_start(event):
     return "kick off (start)" in (event.get("tags", {}).get("Type") or "").strip().lower()
 
 
-def dead_mask(collective_speed, x, y, blocks, events, pitch, fps, params=None):
+def dead_mask(collective_speed, x, y, blocks, events, pitch, fps, params=None, ball_speed=None):
     """Boolean array: True where the ball is judged out of play. Only graded blocks are decided.
 
     `blocks` is [(half, first_frame, last_frame)] with last inclusive, as
@@ -128,7 +196,13 @@ def dead_mask(collective_speed, x, y, blocks, events, pitch, fps, params=None):
     smooth = smooth_speed(collective_speed, fps, p)
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
-    ball_speed = ball_speed_mps(x, y, pitch, fps)
+    # Reutilitzem la velocitat calculada al preprocessament si està disponible.
+    if ball_speed is None:
+        ball_speed = ball_speed_mps(x, y, pitch, fps)
+    else:
+        ball_speed = np.asarray(ball_speed, dtype=float)
+        if len(ball_speed) != n:
+            raise ValueError("ball_speed ha de tenir una dada per frame")
     moving = ball_moving(x, y, pitch, fps, p.move_window_s, p.move_min_m)
 
     dead = np.zeros(n, dtype=bool)

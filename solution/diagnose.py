@@ -53,9 +53,11 @@ def half_report(features, events, block, pitch, fps, params=None):
     windows = [e for e in (events or []) if _is_set_piece(e)
                and int(e["end_frame"]) > first and int(e["start_frame"]) <= last]
     ball_speed = ball_speed_mps(x, y, pitch, fps)
-    restarts = sum(detect_restart(ball_speed, max(int(e["start_frame"]), first),
-                                  min(int(e["end_frame"]), stop), p.kick_speed_mps,
-                                  p.kick_frames) is not None for e in windows)
+    methods = [detect_restart(
+        ball_speed, max(int(e["start_frame"]), first),
+        min(int(e["end_frame"]), stop), p.kick_speed_mps, p.kick_frames,
+        fps=fps, return_kind=True)[1] for e in windows]
+    restarts = sum(method != "none" for method in methods)
 
     def share(mask, within):
         return float(mask[within].mean()) if within.any() else float("nan")
@@ -73,6 +75,8 @@ def half_report(features, events, block, pitch, fps, params=None):
         "ball_out_share_of_visible": share(out, visible),
         "set_piece_windows": len(windows),
         "restarts_found": int(restarts),
+        "restarts_stationary": methods.count("stationary"),
+        "restarts_after_gap": methods.count("after_gap"),
         "dead_share": float(dead.mean()),
         "dead_ball_visible_share": share(visible, dead),
         "dead_ball_moving_share": share(moving, dead),
@@ -94,8 +98,10 @@ def print_report(half, report):
                                                     marker))
     print("ball visible      {:.1%}   seen beyond a line {:.2%} of visible".format(
         report["ball_visible_share"], report["ball_out_share_of_visible"]))
-    print("set pieces        {} windows, kick found in {}".format(
+    print("set pieces        {} windows, candidate restart in {}".format(
         report["set_piece_windows"], report["restarts_found"]))
+    print("  stationary -> motion: {}  |  after tracking gap: {}".format(
+        report["restarts_stationary"], report["restarts_after_gap"]))
     print("called dead       {:.1%} of the half".format(report["dead_share"]))
     print("  ball visible during dead frames      {:.1%}".format(
         report["dead_ball_visible_share"]))

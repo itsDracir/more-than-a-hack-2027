@@ -2,13 +2,13 @@
 
 Contract with the feature builder (the preprocessing notebook, or any possession.py that
 replaces it): a DataFrame with one row per video frame 0..N-1, in order, with these columns.
-Names match solution/preprocessing.ipynb, so its CSV plugs in unchanged.
+Names match solution/01_preprocessing.ipynb, so its CSV plugs in unchanged.
 
     ball_x_norm, ball_y_norm      ball position, 0-1 pitch coordinates, NaN when not tracked
     home_nearest_m                distance ball -> nearest home player (m), NaN when unknown
     away_nearest_m                distance ball -> nearest away player (m), NaN when unknown
-    home_mean_speed_mps           mean speed of tracked home players (m/s)   } see team_speed.py
-    away_mean_speed_mps           mean speed of tracked away players (m/s)   }
+    home_mean_speed_mps           mean speed of tracked home players (m/s)
+    away_mean_speed_mps           mean speed of tracked away players (m/s)
 
 Order of decisions:
   1. outside the graded halves             -> X (never scored)
@@ -24,7 +24,7 @@ import numpy as np
 
 from solution.deadball import dead_mask
 from solution.params import Params
-from solution.teams import AWAY, HOME, segment_teams, team_evidence
+from solution.teams import AWAY, HOME, segment_teams, team_evidence, tactical_team_evidence
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -57,7 +57,7 @@ def graded_mask(n, blocks):
     return mask
 
 
-def label_frames(features, events=None, blocks=None, pitch=None, fps=None, params=None):
+def label_frames(features, events=None, blocks=None, pitch=None, fps=None, params=None, use_tactical_tags=True):
     """Array of 'H' / 'A' / 'D' / 'X', one per row of `features`."""
     check_columns(features)
     p = params or Params()
@@ -68,11 +68,18 @@ def label_frames(features, events=None, blocks=None, pitch=None, fps=None, param
 
     x = features["ball_x_norm"].to_numpy(dtype=float)
     y = features["ball_y_norm"].to_numpy(dtype=float)
-    dead = dead_mask(collective_speed(features), x, y, blocks, events, pitch, fps, p)
+    # No recalculem la velocitat de la pilota si ja la tenim a les features.
+    speed_col = (features["ball_apparent_speed_mps"].to_numpy(dtype=float)
+                 if "ball_apparent_speed_mps" in features.columns else None)
+    dead = dead_mask(collective_speed(features), x, y, blocks, events, pitch, fps, p,
+                     ball_speed=speed_col)
 
     graded = graded_mask(n, blocks)
     evidence = team_evidence(features["home_nearest_m"].to_numpy(dtype=float),
                              features["away_nearest_m"].to_numpy(dtype=float), p)
+    # Utilitzem els tags per frame que va calcular el notebook, sense rellegir l'XML.
+    if use_tactical_tags:
+        evidence += tactical_team_evidence(features, p)
     teams = segment_teams(evidence, graded & ~dead, p)
 
     labels = np.full(n, "X", dtype="<U1")

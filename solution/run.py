@@ -2,16 +2,15 @@
 
     python solution/run.py --name <team_name>
 
-Reads the per-frame feature table written by the feature builder (solution/preprocessing.ipynb
-writes data/processed/features_tactical.csv; a possession.py producing the same columns works
-the same way), adds team speeds from the raw ATD if the table lacks them, reads the Smart
-Tagging, labels every frame and writes evaluation/results/<team_name>.csv, then runs the exact
-check the official scorer runs on it.
+Reads the per-frame feature table from solution/01_preprocessing.ipynb and the
+SET PIECES intervals cached during preprocessing. No raw ATD or Smart Tagging XML is opened
+at prediction time. The model produces evaluation/results/<team_name>.csv, then validates it.
 
 Deterministic: same data in, byte-identical file out.
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -27,23 +26,17 @@ import games  # noqa: E402
 import possession_metrics as pm  # noqa: E402
 from solution.labeling import label_frames  # noqa: E402
 from solution.params import Params  # noqa: E402
-from solution.team_speed import team_mean_speeds  # noqa: E402
 
 SPEED_COLUMNS = ["home_mean_speed_mps", "away_mean_speed_mps"]
 DEFAULT_FEATURES = os.path.join(games.DATA_DIR, "processed", "features_tactical.csv")
-SPEED_CACHE = os.path.join(games.DATA_DIR, "processed", "team_speed.npy")
+DEFAULT_EVENTS = os.path.join(games.DATA_DIR, "processed", "smart_tagging_events.json")
 RESULTS_DIR = os.path.join(ROOT, "evaluation", "results")
 
 MISSING_FEATURES = """No feature table at {}
 
-Build it first -- it is the per-frame table this step labels. Either run the preprocessing
-notebook end to end (outputs go to data/processed/, which git ignores, so no match data ends up
-in a commit):
-
-    python -m jupyter nbconvert --to notebook --execute solution/preprocessing.ipynb --output-dir data/processed
-
-or run your own feature builder (possession.py), as long as it writes the same columns
-(see solution/labeling.py). Then run this again, or point --features at another file."""
+Executa primer el notebook solution/01_preprocessing.ipynb, que guarda les features
+privades a data/processed/ (o a la ruta configurada). Després executa run.py.
+També pots indicar una ruta alternativa amb --features."""
 
 
 def display_path(path):
@@ -73,34 +66,40 @@ def load_features(path, n_frames):
 
 
 def add_team_speeds(features, n_frames, refresh=False):
-    """Fill in the speed columns from the raw ATD (one pass, cached) if the table lacks them."""
-    if all(c in features.columns for c in SPEED_COLUMNS):
-        return features
-    if os.path.exists(SPEED_CACHE) and not refresh:
-        speeds = np.load(SPEED_CACHE)
-        print("team speeds: cache {}".format(display_path(SPEED_CACHE)))
-    else:
-        from starter.baseline import team_of_each_track
-        meta_path, raw_path = games.require(["atd_meta", "atd_raw"])
-        print("team speeds: reading {} (one pass, about a minute) ..."
-              .format(os.path.basename(raw_path)))
-        with open(raw_path, encoding="utf-8-sig") as handle:
-            speeds = team_mean_speeds(handle, team_of_each_track(meta_path), n_frames)
-        os.makedirs(os.path.dirname(SPEED_CACHE), exist_ok=True)
-        np.save(SPEED_CACHE, speeds)
-    features = features.copy()
-    features[SPEED_COLUMNS[0]], features[SPEED_COLUMNS[1]] = speeds[:, 0], speeds[:, 1]
+    """Comprova que ja tenim les velocitats calculades al preprocessament.
+
+    Conservem el nom per compatibilitat amb diagnose.py; no rellegim l'ATD.
+    """
+    missing = [c for c in SPEED_COLUMNS if c not in features.columns]
+    if missing:
+        raise ValueError(
+            "Falten {}. Torna a executar solution/01_preprocessing.ipynb: "
+            "ara calcula les velocitats mitjanes en la primera lectura de l'ATD."
+            .format(missing)
+        )
+    if len(features) != n_frames:
+        raise ValueError("Nombre incorrecte de frames")
     return features
 
 
-def load_events():
-    """Smart Tagging intervals, or None (with a warning) if the file is not there."""
-    from starter import load_smart_tagging
-    try:
-        return load_smart_tagging.load()
-    except Exception as error:  # missing file: run without it rather than not at all
-        print("WARNING: running without Smart Tagging ({})".format(error))
-        return None
+def load_events(path=DEFAULT_EVENTS):
+    """Obté els intervals de reinici preprocessats; mai obre l'XML original."""
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            "No trobo {}. Executa solution/01_preprocessing.ipynb per generar "
+            "smart_tagging_events.json, passa --events o fes servir --no-smart-tagging."
+            .format(display_path(path))
+        )
+    with open(path, encoding="utf-8") as handle:
+        events = json.load(handle)
+    if not isinstance(events, list):
+        raise ValueError("El JSON d'Smart Tagging ha de contenir una llista d'intervals")
+    for event in events:
+        if not isinstance(event, dict) or not all(
+            key in event for key in ("code", "start_frame", "end_frame", "tags")
+        ):
+            raise ValueError("Format inesperat a smart_tagging_events.json")
+    return events
 
 
 def write_submission(path, labels):
@@ -134,9 +133,10 @@ def main(argv=None):
     parser.add_argument("--name", required=True, help="team name: the file is <name>.csv")
     parser.add_argument("--features", default=DEFAULT_FEATURES, help="per-frame feature table")
     parser.add_argument("--out", default=RESULTS_DIR)
-    parser.add_argument("--no-smart-tagging", action="store_true")
-    parser.add_argument("--refresh-speeds", action="store_true",
-                        help="re-read the ATD instead of using the cached team speeds")
+    parser.add_argument("--events", default=DEFAULT_EVENTS,
+                        help="JSON d'intervals SET PIECES produït pel preprocessament")
+    parser.add_argument("--no-smart-tagging", action="store_true",
+                        help="Ignora tant els intervals de reinici com les features tàctiques")
     args = parser.parse_args(argv)
 
     if not os.path.exists(args.features):
@@ -145,11 +145,11 @@ def main(argv=None):
 
     n_frames = games.source_frames("tactical")
     blocks = games.half_video_blocks(games.GAME)
-    features = add_team_speeds(load_features(args.features, n_frames), n_frames,
-                               args.refresh_speeds)
-    events = None if args.no_smart_tagging else load_events()
+    features = add_team_speeds(load_features(args.features, n_frames), n_frames)
+    events = None if args.no_smart_tagging else load_events(args.events)
 
-    labels = label_frames(features, events, blocks, params=Params())
+    labels = label_frames(features, events, blocks, params=Params(),
+                          use_tactical_tags=not args.no_smart_tagging)
     path = write_submission(os.path.join(args.out, args.name + ".csv"), labels)
 
     problem = pm.validate_submission(pm.read_label_csv(path), n_frames)
