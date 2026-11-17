@@ -1,20 +1,22 @@
-"""Per-frame features in, H / A / D / X labels out. The decision layer of the pipeline.
+"""Features per frame a l'entrada, etiquetes H / A / D / X a la sortida. La capa de decisió del
+pipeline.
 
-Contract with the feature builder (the preprocessing notebook, or any possession.py that
-replaces it): a DataFrame with one row per video frame 0..N-1, in order, with these columns.
-Names match solution/preprocessing.ipynb, so its CSV plugs in unchanged.
+Contracte amb el constructor de features (el notebook de preprocessament, o qualsevol
+possession.py que el substitueixi): un DataFrame amb una fila per frame de vídeo 0..N-1, en
+ordre, amb aquestes columnes. Els noms coincideixen amb solution/preprocessing.ipynb, així que el
+seu CSV s'hi connecta sense canvis.
 
-    ball_x_norm, ball_y_norm      ball position, 0-1 pitch coordinates, NaN when not tracked
-    home_nearest_m                distance ball -> nearest home player (m), NaN when unknown
-    away_nearest_m                distance ball -> nearest away player (m), NaN when unknown
-    home_mean_speed_mps           mean speed of tracked home players (m/s)   } see team_speed.py
-    away_mean_speed_mps           mean speed of tracked away players (m/s)   }
+    ball_x_norm, ball_y_norm      posició de la pilota, coordenades 0-1 del camp, NaN si no es veu
+    home_nearest_m                distància pilota -> jugador local més proper (m), NaN si es desconeix
+    away_nearest_m                distància pilota -> jugador visitant més proper (m), NaN si es desconeix
+    home_mean_speed_mps           velocitat mitjana dels jugadors locals seguits (m/s)    } vegeu
+    away_mean_speed_mps           velocitat mitjana dels jugadors visitants seguits (m/s) } team_speed.py
 
-Order of decisions:
-  1. outside the graded halves             -> X (never scored)
-  2. ball out of play (deadball.py)        -> D
-  3. in play: which team (teams.py)        -> H / A
-  4. in play but the ball is never seen    -> X (the scorer carries the previous label)
+Ordre de les decisions:
+  1. fora de les parts puntuades              -> X (mai es puntua)
+  2. pilota fora de joc (deadball.py)         -> D
+  3. en joc: quin equip (teams.py)            -> H / A
+  4. en joc però la pilota no es veu mai      -> X (el scorer hi posa l'etiqueta anterior)
 """
 
 import os
@@ -43,7 +45,7 @@ def check_columns(features):
 
 
 def collective_speed(features):
-    """Mean of the two team means, ignoring a team with no tracked player."""
+    """Mitjana de les dues mitjanes d'equip, ignorant un equip sense cap jugador seguit."""
     speeds = features[["home_mean_speed_mps", "away_mean_speed_mps"]].to_numpy(dtype=float)
     counts = np.isfinite(speeds).sum(axis=1)
     total = np.nansum(speeds, axis=1)
@@ -58,7 +60,7 @@ def graded_mask(n, blocks):
 
 
 def label_frames(features, events=None, blocks=None, pitch=None, fps=None, params=None):
-    """Array of 'H' / 'A' / 'D' / 'X', one per row of `features`."""
+    """Array de 'H' / 'A' / 'D' / 'X', una per cada fila de `features`."""
     check_columns(features)
     p = params or Params()
     blocks = blocks if blocks is not None else games.half_video_blocks(games.GAME)

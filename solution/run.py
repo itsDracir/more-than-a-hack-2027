@@ -1,14 +1,15 @@
-"""Data in, submission out -- the one command that regenerates the file we upload.
+"""Dades a l'entrada, entrega a la sortida -- l'única ordre que regenera el fitxer que pugem.
 
-    python solution/run.py --name <team_name>
+    python solution/run.py --name <nom_equip>
 
-Reads the per-frame feature table written by the feature builder (solution/preprocessing.ipynb
-writes data/processed/features_tactical.csv; a possession.py producing the same columns works
-the same way), adds team speeds from the raw ATD if the table lacks them, reads the Smart
-Tagging, labels every frame and writes evaluation/results/<team_name>.csv, then runs the exact
-check the official scorer runs on it.
+Llegeix la taula de features per frame que escriu el constructor de features
+(solution/preprocessing.ipynb escriu data/processed/features_tactical.csv; un possession.py que
+produeixi les mateixes columnes funciona igual), hi afegeix les velocitats dels equips a partir de
+l'ATD en brut si la taula no les té, llegeix el Smart Tagging, etiqueta cada frame i escriu
+evaluation/results/<nom_equip>.csv, i després hi passa exactament la mateixa comprovació que fa el
+scorer oficial.
 
-Deterministic: same data in, byte-identical file out.
+Determinista: les mateixes dades d'entrada donen un fitxer idèntic byte a byte.
 """
 
 import argparse
@@ -47,8 +48,8 @@ or run your own feature builder (possession.py), as long as it writes the same c
 
 
 def display_path(path):
-    """Path relative to the repository when it is inside it, absolute otherwise. On Windows
-    relpath raises for a path on another drive, which must not crash a finished run."""
+    """Ruta relativa al repositori quan hi és a dins, absoluta si no. A Windows relpath falla amb
+    una ruta en una altra unitat, i això no ha de fer petar una execució que ja ha acabat."""
     absolute = os.path.abspath(path)
     try:
         relative = os.path.relpath(absolute, ROOT)
@@ -58,7 +59,8 @@ def display_path(path):
 
 
 def load_features(path, n_frames):
-    """The feature table, one row per video frame 0..n_frames-1 in order, or a clear error."""
+    """La taula de features, una fila per frame de vídeo 0..n_frames-1 en ordre, o un error
+    clar."""
     table = pd.read_parquet(path) if path.endswith(".parquet") else pd.read_csv(path, low_memory=False)
     if "frame" not in table.columns:
         raise ValueError("{}: no 'frame' column".format(path))
@@ -73,7 +75,8 @@ def load_features(path, n_frames):
 
 
 def add_team_speeds(features, n_frames, refresh=False):
-    """Fill in the speed columns from the raw ATD (one pass, cached) if the table lacks them."""
+    """Omple les columnes de velocitat a partir de l'ATD en brut (una passada, en memòria cau)
+    si la taula no les té."""
     if all(c in features.columns for c in SPEED_COLUMNS):
         return features
     if os.path.exists(SPEED_CACHE) and not refresh:
@@ -94,11 +97,11 @@ def add_team_speeds(features, n_frames, refresh=False):
 
 
 def load_events():
-    """Smart Tagging intervals, or None (with a warning) if the file is not there."""
+    """Intervals del Smart Tagging, o None (amb un avís) si el fitxer no hi és."""
     from starter import load_smart_tagging
     try:
         return load_smart_tagging.load()
-    except Exception as error:  # missing file: run without it rather than not at all
+    except Exception as error:  # fitxer absent: millor funcionar sense que no funcionar
         print("WARNING: running without Smart Tagging ({})".format(error))
         return None
 
@@ -114,7 +117,8 @@ def write_submission(path, labels):
 
 
 def summarise(labels, blocks):
-    """What to sanity-check before uploading -- computed on our own file, no ground truth."""
+    """El que cal revisar abans de pujar-lo -- calculat sobre el nostre fitxer, sense ground
+    truth."""
     runs = [(first, last + 1) for _, first, last in blocks]
     graded = np.concatenate([labels[a:b] for a, b in runs])
     print("\ngraded frames: {}".format(len(graded)))

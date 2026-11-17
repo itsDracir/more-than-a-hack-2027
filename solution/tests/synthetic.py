@@ -1,8 +1,9 @@
-"""A small fake match with a known answer, for testing the pipeline end to end without the data.
+"""Un petit partit fals amb la resposta coneguda, per provar el pipeline de cap a peus sense les
+dades.
 
-It encodes the assumptions the pipeline makes -- players slow down when the ball is dead, the team
-on the ball has a player close to it, the tracker loses the ball in bursts -- so passing on it
-proves the mechanics work, not that the assumptions hold on the real match.
+Codifica les hipòtesis que fa el pipeline -- els jugadors afluixen quan la pilota és morta,
+l'equip amb la pilota té un jugador a prop, el tracker perd la pilota a ràfegues -- així que
+superar-lo demostra que el mecanisme funciona, no que les hipòtesis es compleixin al partit real.
 """
 
 import numpy as np
@@ -17,17 +18,17 @@ PLAN = [("D", 300), ("H", 500), ("A", 350), ("D", 200), ("A", 600), ("H", 250), 
 
 
 def synthetic_match(seed=0):
-    """(features, events, blocks, truth) for one synthetic half."""
+    """(features, events, blocks, truth) per a una part sintètica."""
     rng = np.random.default_rng(seed)
     truth = np.array(["X"] * PAD + [lab for lab, n in PLAN for _ in range(n)] + ["X"] * PAD)
     n = len(truth)
     blocks = [(1, PAD, n - PAD - 1)]
 
-    # Collective speed: running during play, walking during a stoppage.
+    # Velocitat col·lectiva: corrent durant el joc, caminant durant una aturada.
     alive = (truth == "H") | (truth == "A")
     speed = np.where(alive, rng.normal(2.6, 0.4, n), rng.normal(0.9, 0.3, n)).clip(0, None)
 
-    # The tracker loses the ball in bursts: ~60% visible.
+    # El tracker perd la pilota a ràfegues: ~60% visible.
     visible = np.zeros(n, dtype=bool)
     state = True
     for t in range(n):
@@ -42,7 +43,7 @@ def synthetic_match(seed=0):
     home = np.where(truth == "H", own, other)
     away = np.where(truth == "A", own, other)
 
-    # Deflections: the other side touches the ball for three frames, about every six seconds.
+    # Desviaments: l'altre equip toca la pilota durant tres frames, més o menys cada sis segons.
     for t in np.flatnonzero(alive & (rng.random(n) < 1 / 150.0)):
         team = truth[t]
         home[t:t + 3] = 3.0 if team == "H" else 0.4
@@ -55,11 +56,11 @@ def synthetic_match(seed=0):
         stop = start + length
         if label == "D":
             home[start:stop] = away[start:stop] = 3.0
-            if index:                                  # ball went out over the goal line
+            if index:                                  # la pilota ha sortit per la línia de fons
                 x[start:start + 15] = 1.02
                 visible[start:start + 15] = True
             taker = PLAN[index + 1][0] if index + 1 < len(PLAN) else None
-            if taker:                                  # restart: ball parked, taker on it, kick
+            if taker:                                  # represa: pilota quieta, llançador a sobre, xut
                 x[stop - 60:stop] = x[stop - 61]
                 y[stop - 60:stop] = y[stop - 61]
                 visible[stop - 60:stop + 10] = True
@@ -72,7 +73,7 @@ def synthetic_match(seed=0):
                                "end_frame": stop + 37,
                                "tags": {"Type": "Kick Off (Start)" if not index else "Throw-in",
                                         "Team": "N/A"}})
-        elif previous not in (None, "D", label):       # a turnover: loose ball before it
+        elif previous not in (None, "D", label):       # una pèrdua: pilota solta abans
             home[start - 15:start] = away[start - 15:start] = 2.5
         previous = label
         start = stop

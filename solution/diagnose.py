@@ -1,15 +1,16 @@
-"""What the dead-ball detector sees on the real match, as aggregates only -- no ground truth.
+"""Què veu el detector de pilota morta al partit real, només amb agregats -- sense ground truth.
 
     python solution/diagnose.py
 
-Prints, per half, the numbers that say whether each dead-ball signal behaves: the speed
-distribution and where Otsu cut it, how much of the half ends up dead, and -- the key check --
-how often the ball is *moving inside the pitch* during frames called dead. In a real stoppage the
-ball is parked, out, or being fetched; if it is often travelling during "dead" frames, the
-detector is calling slow possession play a stoppage.
+Imprimeix, per a cada part, els números que diuen si cada senyal de pilota morta es comporta bé:
+la distribució de velocitats i la seva mediana, quina proporció de la part acaba morta i -- la
+comprovació clau -- amb quina freqüència la pilota es *mou dins del camp* durant els frames
+declarats morts. En una aturada real la pilota està quieta, fora o l'estan anant a buscar; si
+sovint viatja durant frames "morts", el detector està confonent joc de possessió lent amb una
+aturada.
 
-Only counts, shares and quantiles are printed. Nothing frame-level, so the output is safe to
-paste anywhere.
+Només s'imprimeixen recomptes, proporcions i quantils. Res a nivell de frame, així que la sortida
+es pot enganxar a qualsevol lloc sense problema.
 """
 
 import os
@@ -29,7 +30,7 @@ from solution.params import Params  # noqa: E402
 
 
 def half_report(features, events, block, pitch, fps, params=None):
-    """Aggregate diagnostics for one graded half. Every value is a number or a short tuple."""
+    """Diagnòstic agregat d'una part puntuada. Cada valor és un número o una tupla curta."""
     p = params or Params()
     _, first, last = block
     stop = last + 1

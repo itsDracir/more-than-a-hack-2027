@@ -1,23 +1,26 @@
-"""Mean player speed of each team per frame -- the main dead-ball signal.
+"""Velocitat mitjana dels jugadors de cada equip per frame -- el senyal principal de pilota morta.
 
-This is the one thing the decision layer needs from the raw tracking that the per-frame feature
-table (ball position, nearest player per team) does not already carry. If your feature builder
-adds `home_mean_speed_mps` and `away_mean_speed_mps` itself, run.py uses those and never calls
-this. Otherwise it costs one streaming pass over the ATD, cached under data/processed/.
+És l'única cosa que la capa de decisió necessita del tracking en brut i que la taula de features
+per frame (posició de la pilota, jugador més proper de cada equip) encara no porta. Si el vostre
+constructor de features ja afegeix `home_mean_speed_mps` i `away_mean_speed_mps`, run.py fa servir
+aquestes i mai no crida aquest mòdul. Si no, costa una passada en streaming per l'ATD, que es desa
+a data/processed/.
 
-Raw ATD line: "<frame_id>:<x,y,speed>;<x,y,speed>;...:<ball>", "NaN" for a missing slot,
-frame_id counting from 1 (video frame = frame_id - 1).
+Línia de l'ATD en brut: "<frame_id>:<x,y,speed>;<x,y,speed>;...:<pilota>", "NaN" per a un slot
+absent, frame_id comptant des d'1 (frame de vídeo = frame_id - 1).
 """
 
 import numpy as np
 
-# Faster than any sprint ever measured: a value above this is a tracking glitch, not a player.
+# Més ràpid que qualsevol esprint mai mesurat: un valor per sobre és un error del tracking, no un
+# jugador.
 MAX_SPEED_MPS = 12.0
 
 
 def team_mean_speeds(lines, team_by_slot, n_frames, max_speed=MAX_SPEED_MPS):
-    """(n_frames, 2) array of mean speed in m/s, column 0 home and 1 away. NaN where a team has
-    no tracked player. `lines` is any iterable of raw ATD lines (an open file works)."""
+    """Array (n_frames, 2) de velocitat mitjana en m/s, columna 0 local i 1 visitant. NaN quan un
+    equip no té cap jugador seguit. `lines` és qualsevol iterable de línies de l'ATD en brut (un
+    fitxer obert serveix)."""
     team = np.asarray(team_by_slot, dtype=np.int8)
     out = np.full((n_frames, 2), np.nan)
     for line in lines:
@@ -31,7 +34,7 @@ def team_mean_speeds(lines, team_by_slot, n_frames, max_speed=MAX_SPEED_MPS):
         for slot, group in enumerate(parts[1].split(";")):
             fields = group.split(",")
             if len(fields) < 3:
-                continue                                    # "NaN": slot not tracked
+                continue                                    # "NaN": slot sense seguiment
             speed = float(fields[2])
             if speed != speed:
                 continue

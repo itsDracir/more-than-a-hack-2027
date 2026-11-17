@@ -10,10 +10,10 @@ FPS = 25
 
 
 def moving_ball(n, start_moving, step=0.004):
-    """Ball parked at the centre spot, then kicked along x from `start_moving` on."""
+    """Pilota aturada al punt central i després xutada al llarg de x a partir de `start_moving`."""
     x = np.full(n, 0.5)
     x[start_moving:] = 0.5 + step * np.arange(1, n - start_moving + 1)
-    x = np.minimum(x, 0.9)                          # stays on the pitch
+    x = np.minimum(x, 0.9)                          # es queda dins del camp
     y = np.full(n, 0.5)
     return x, y
 
@@ -35,7 +35,7 @@ class BallSpeedTest(unittest.TestCase):
         y = np.full(4, 0.5)
         speed = ball_speed_mps(x, y, PITCH, FPS)
         self.assertTrue(np.isnan(speed[0]))
-        self.assertAlmostEqual(speed[1], 25.0)        # 1 m in one frame at 25 fps
+        self.assertAlmostEqual(speed[1], 25.0)        # 1 m en un frame a 25 fps
         self.assertTrue(np.isnan(speed[2]) and np.isnan(speed[3]))
 
 
@@ -52,7 +52,7 @@ class DetectRestartTest(unittest.TestCase):
 
     def test_single_frame_jitter_is_not_a_kick(self):
         x, y = moving_ball(200, start_moving=200)
-        x[80] += 0.01                               # one-frame jump of ~1 m
+        x[80] += 0.01                               # salt d'~1 m durant un sol frame
         self.assertIsNone(detect_restart(ball_speed_mps(x, y, PITCH, FPS), 10, 150))
 
 
@@ -64,7 +64,7 @@ class DeadEvidenceTest(unittest.TestCase):
         speed[:50] = 0.8
         x = np.full(n, 0.5)
         y = np.full(n, 0.5)
-        x[70:75] = 1.03                              # ball over the goal line
+        x[70:75] = 1.03                              # pilota per sobre de la línia de fons
         evidence = dead_evidence(speed, 1.7, x, y, PITCH)
         self.assertTrue((evidence[:50] > 0).all())
         self.assertTrue((evidence[50:70] < 0).all())
@@ -82,8 +82,8 @@ class DeadMaskTest(unittest.TestCase):
     def test_long_stoppage_found_and_short_dip_ignored(self):
         n = 3000
         speed = np.full(n, 2.6)
-        speed[1000:1400] = 0.9                       # a 16 s stoppage
-        speed[2000:2010] = 0.9                       # players ease off for 0.4 s: not a stoppage
+        speed[1000:1400] = 0.9                       # una aturada de 16 s
+        speed[2000:2010] = 0.9                       # els jugadors afluixen 0,4 s: no és aturada
         nan = np.full(n, np.nan)
         dead = dead_mask(speed, nan, nan, blocks=[(1, 0, n - 1)], events=None, pitch=PITCH,
                          fps=FPS)
@@ -93,8 +93,8 @@ class DeadMaskTest(unittest.TestCase):
 
     def test_everything_before_the_kickoff_is_dead(self):
         n = 2000
-        speed = np.full(n, 2.6)                      # players warming up fast: speed says alive
-        speed[1500:1700] = 0.9                       # a stoppage later on, so "slow" is defined
+        speed = np.full(n, 2.6)                      # jugadors escalfant ràpid: la velocitat diu joc
+        speed[1500:1700] = 0.9                       # una aturada més tard, perquè "lent" tingui sentit
         x, y = moving_ball(n, start_moving=230)
         events = [{"code": "SET PIECES", "start_frame": 150, "end_frame": 275,
                    "tags": {"Type": "Kick Off (Start)"}}]
@@ -118,9 +118,9 @@ class BallMovingTest(unittest.TestCase):
 
 
 class SlowPossessionTest(unittest.TestCase):
-    """Real-match finding (diagnose.py): collective speed is unimodal, and slow possession play
-    is as slow as a stoppage. What separates them is the ball -- passed around in one, parked or
-    gone in the other."""
+    """Troballa del partit real (diagnose.py): la velocitat col·lectiva és unimodal, i el joc de
+    possessió lent és tan lent com una aturada. El que els separa és la pilota -- passada d'un a
+    l'altre en un cas, quieta o desapareguda en l'altre."""
 
     def test_ball_moving_in_the_pitch_points_to_play(self):
         n = 50
@@ -137,11 +137,11 @@ class SlowPossessionTest(unittest.TestCase):
         speed = rng.normal(2.0, 0.6, n).clip(0.2)
         x = np.full(n, np.nan)
         y = np.full(n, np.nan)
-        build_up = slice(1000, 1750)                 # 30 s of slow passing at the back
+        build_up = slice(1000, 1750)                 # 30 s de passades lentes a la defensa
         speed[build_up] = rng.normal(1.0, 0.2, 750)
         x[build_up] = 0.3 + 0.08 * np.sin(2 * np.pi * np.arange(750) / 75)
         y[build_up] = 0.5
-        speed[3000:3400] = rng.normal(0.9, 0.2, 400)  # 16 s stoppage, ball gone, players walk
+        speed[3000:3400] = rng.normal(0.9, 0.2, 400)  # aturada de 16 s: sense pilota, caminant
         dead = dead_mask(speed, x, y, blocks=[(1, 0, n - 1)], events=None, pitch=PITCH, fps=FPS)
         self.assertLess(dead[build_up].mean(), 0.1)
         self.assertGreater(dead[3050:3350].mean(), 0.9)
@@ -150,8 +150,9 @@ class SlowPossessionTest(unittest.TestCase):
 class KickoffWindowTest(unittest.TestCase):
 
     def test_undetected_first_half_kickoff_does_not_kill_the_half(self):
-        # The first half is graded from the kick-off itself, so its Kick Off window starts
-        # before the block. If the kick is not found there is nothing before the block to force.
+        # La primera part es puntua des del mateix xut inicial, així que la seva finestra de
+        # Kick Off comença abans del bloc. Si no es troba el xut, abans del bloc no hi ha res a
+        # forçar.
         n = 3000
         speed = np.full(n, 2.6)
         speed[2000:2300] = 0.9

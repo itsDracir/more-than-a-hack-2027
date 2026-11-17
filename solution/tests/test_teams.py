@@ -6,7 +6,7 @@ from solution.teams import HOME, AWAY, NONE, segment_teams, team_evidence
 
 
 def control(n, team):
-    """Distances for `n` frames where `team` has a player on the ball and the other is 5 m off."""
+    """Distàncies per a `n` frames on `team` té un jugador amb la pilota i l'altre és a 5 m."""
     near, far = np.full(n, 0.5), np.full(n, 5.0)
     return (near, far) if team == HOME else (far, near)
 
@@ -19,8 +19,8 @@ class TeamEvidenceTest(unittest.TestCase):
         evidence = team_evidence(home, away)
         self.assertGreater(evidence[0], 0)
         self.assertLess(evidence[1], 0)
-        self.assertEqual(evidence[2], 0)             # no ball, no evidence
-        self.assertGreater(evidence[3], 0)           # only home tracked near the ball
+        self.assertEqual(evidence[2], 0)             # sense pilota, sense indici
+        self.assertGreater(evidence[3], 0)           # només hi ha locals seguits a prop de la pilota
         self.assertLess(evidence[4], 0)
 
     def test_nobody_near_the_ball_is_weak_evidence(self):
@@ -33,13 +33,13 @@ class SegmentTeamsTest(unittest.TestCase):
 
     def test_brief_opponent_touch_does_not_flip(self):
         home, away = control(300, HOME)
-        home[150:153], away[150:153] = 5.0, 0.5     # a deflection
+        home[150:153], away[150:153] = 5.0, 0.5     # un desviament
         codes = segment_teams(team_evidence(home, away), np.ones(300, dtype=bool))
         self.assertTrue((codes == HOME).all())
 
     def test_turnover_is_placed_at_the_first_touch_of_the_new_team(self):
         h1, a1 = control(100, HOME)
-        gap = np.full(30, np.nan)                    # ball lost by the tracker during the duel
+        gap = np.full(30, np.nan)                    # el tracker perd la pilota durant el duel
         h2, a2 = control(170, AWAY)
         home = np.concatenate([h1, gap, h2])
         away = np.concatenate([a1, gap, a2])
@@ -48,13 +48,13 @@ class SegmentTeamsTest(unittest.TestCase):
 
     def test_dead_frames_and_evidence_free_runs_get_no_team(self):
         home, away = control(100, HOME)
-        home[60:], away[60:] = np.nan, np.nan        # second alive run never sees the ball
+        home[60:], away[60:] = np.nan, np.nan        # el segon tram en joc no veu mai la pilota
         alive = np.ones(100, dtype=bool)
         alive[40:50] = False
         codes = segment_teams(team_evidence(home, away), alive)
         self.assertTrue((codes[:40] == HOME).all())
         self.assertTrue((codes[40:50] == NONE).all())
-        self.assertTrue((codes[50:] == HOME).all())  # 50..59 still see home on the ball
+        self.assertTrue((codes[50:] == HOME).all())  # del 50 al 59 encara es veu el local amb la pilota
 
         codes = segment_teams(team_evidence(np.full(10, np.nan), np.full(10, np.nan)),
                               np.ones(10, dtype=bool))

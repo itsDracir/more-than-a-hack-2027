@@ -1,21 +1,22 @@
-"""Which team has the ball, inside stretches already known to be in play.
+"""Quin equip té la pilota, dins dels trams que ja se sap que són en joc.
 
-Input is the per-frame distance from the ball to the nearest home and nearest away player -- what
-the preprocessing produces (home_nearest_m / away_nearest_m, NaN where the ball is not seen).
+L'entrada és la distància per frame de la pilota al jugador local més proper i al visitant més
+proper -- el que produeix el preprocessament (home_nearest_m / away_nearest_m, NaN quan la pilota
+no es veu).
 
-Two steps:
+Dos passos:
 
-1. **Viterbi** over {home, away} with a cost per change of possession. A deflection or a lost
-   duel gives the other team a few frames of evidence, not enough to pay for two switches, so it
-   does not split the possession. A real interception gives sustained evidence and does.
-2. **Move each change to the new team's first touch.** Between the old team's last touch and
-   the new team's first one, the ball is loose or in the air and the evidence is indifferent, so
-   Viterbi may put the change anywhere in that gap. The ground truth gives the ball to the new
-   team when it gains control -- loose balls stay with the last team (CHALLENGE.md) -- so the
-   change goes at the first touch. One second late costs a third of spellF1 (EVALUATION.md).
+1. **Viterbi** sobre {local, visitant} amb un cost per cada canvi de possessió. Un desviament o
+   un duel perdut dona a l'altre equip uns quants frames d'indici, no prou per pagar dos canvis,
+   així que no parteix la possessió. Una intercepció real dona un indici sostingut i sí que ho fa.
+2. **Moure cada canvi al primer toc del nou equip.** Entre l'últim toc de l'equip antic i el
+   primer del nou, la pilota està solta o per l'aire i l'indici és indiferent, així que Viterbi
+   pot posar el canvi a qualsevol punt d'aquest buit. El ground truth dona la pilota al nou equip
+   quan n'agafa el control -- les pilotes soltes es queden amb l'últim equip (CHALLENGE.md) -- així
+   que el canvi va al primer toc. Un segon tard costa un terç de l'spellF1 (EVALUATION.md).
 
-Frames where the ball is not tracked carry no evidence and simply continue the current
-possession, which is what an occlusion inside a possession should do.
+Els frames sense pilota no aporten cap indici i simplement continuen la possessió actual, que és
+el que ha de fer una oclusió dins d'una possessió.
 """
 
 import numpy as np
@@ -27,24 +28,24 @@ HOME, AWAY, NONE = 0, 1, -1
 
 
 def team_evidence(home_nearest_m, away_nearest_m, params=None):
-    """Per-frame evidence that the home team (positive) or away team (negative) is on the ball.
+    """Indici per frame que l'equip local (positiu) o el visitant (negatiu) té la pilota.
 
-    Strong only when someone is actually close to the ball: weighted by exp(-closest / r).
-    A team with no tracked player near the ball is treated as infinitely far.
+    Només és fort quan algú està realment a prop de la pilota: ponderat per exp(-més_proper / r).
+    Un equip sense cap jugador seguit a prop de la pilota es tracta com si fos infinitament lluny.
     """
     p = params or Params()
     home = np.where(np.isfinite(home_nearest_m), home_nearest_m, np.inf)
     away = np.where(np.isfinite(away_nearest_m), away_nearest_m, np.inf)
     with np.errstate(invalid="ignore"):
         closest = np.minimum(home, away)
-        margin = np.clip(away - home, -10.0, 10.0)          # inf - inf -> NaN -> no evidence
+        margin = np.clip(away - home, -10.0, 10.0)          # inf - inf -> NaN -> sense indici
         evidence = np.exp(-closest / p.control_radius_m) * np.tanh(margin / p.margin_scale_m)
     evidence[~np.isfinite(evidence)] = 0.0
     return evidence + 0.0
 
 
 def runs_of(mask):
-    """[(start, stop)] half-open runs where `mask` is True."""
+    """[(start, stop)] trams semioberts on `mask` és True."""
     edges = np.diff(np.concatenate(([0], np.asarray(mask, dtype=np.int8), [0])))
     return list(zip(np.flatnonzero(edges == 1).tolist(), np.flatnonzero(edges == -1).tolist()))
 
@@ -54,7 +55,7 @@ def _touches(evidence, team, threshold):
 
 
 def move_changes_to_first_touch(path, evidence, threshold):
-    """Shift each change of team to the new team's first touch after the old team's last one."""
+    """Desplaça cada canvi d'equip al primer toc del nou equip després de l'últim de l'antic."""
     out = path.copy()
     changes = (np.flatnonzero(path[1:] != path[:-1]) + 1).tolist()
     bounds = [0] + changes + [len(path)]
@@ -75,8 +76,9 @@ def move_changes_to_first_touch(path, evidence, threshold):
 
 
 def segment_teams(evidence, alive, params=None):
-    """Team code per frame: HOME / AWAY inside alive runs, NONE on dead frames and on alive runs
-    that never see the ball (the scorer forward-fills those; guessing would only add noise)."""
+    """Codi d'equip per frame: HOME / AWAY dins dels trams en joc, NONE als frames morts i als
+    trams en joc on la pilota no es veu mai (el scorer els omple amb l'etiqueta anterior; endevinar
+    només hi afegiria soroll)."""
     p = params or Params()
     evidence = np.asarray(evidence, dtype=float)
     codes = np.full(len(evidence), NONE, dtype=np.int8)

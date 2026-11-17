@@ -1,21 +1,25 @@
-"""Is the ball in play? Decided from evidence of a stoppage -- never from "the tracker lost the ball".
+"""La pilota és en joc? Es decideix amb indicis d'una aturada -- mai perquè "el tracker ha perdut
+la pilota".
 
-The baseline says D whenever the ball is not tracked. That conflates two unrelated things: the
-ball is missing on 41% of graded frames, mostly *during* play (duels, crowded boxes, balls in the
-air). Every spurious D splits a real possession in two, and spellF1 then loses both halves.
+El baseline diu D sempre que la pilota no està seguida. Això barreja dues coses que no tenen res a
+veure: la pilota falta en el 41% dels frames puntuats, sobretot *durant* el joc (duels, àrees
+plenes, pilotes per l'aire). Cada D espuri parteix una possessió real en dues, i l'spellF1 perd
+les dues meitats.
 
-Evidence used here, all automatic:
+Indicis que es fan servir, tots automàtics:
 
-- **ball moving inside the pitch**: travelling more than 2 m in a second, in bounds. The
-  strongest sign of play, and the one that separates a patient build-up from a stoppage.
-- **collective speed**: when the referee stops play, players stop running -- but slow possession
-  play is just as slow, so this is weak evidence, relative to the half's median pace.
-- **ball beyond a line**: if the tracker sees it out, it is out.
-- **Smart Tagging SET PIECES**: a restart happens inside each window; the kick is located on the
-  ball track, frames before it lean dead and the second after it leans alive.
-- **Kick Off (Start)**: nothing before the kick-off of a half is play.
+- **pilota movent-se dins del camp**: recorre més de 2 m en un segon, dins de les línies. És el
+  senyal de joc més fort, i el que separa una sortida pausada d'una aturada.
+- **velocitat col·lectiva**: quan l'àrbitre atura el joc, els jugadors deixen de córrer -- però el
+  joc de possessió lent és igual de lent, així que és un indici feble, relatiu al ritme mitjà de
+  la part.
+- **pilota més enllà d'una línia**: si el tracker la veu fora, és fora.
+- **Smart Tagging SET PIECES**: dins de cada finestra hi ha una represa; el xut es localitza a la
+  trajectòria de la pilota, els frames d'abans tendeixen a mort i el segon de després a joc.
+- **Kick Off (Start)**: res del que passa abans del xut inicial d'una part és joc.
 
-A two-state Viterbi with a cost for entering/leaving a stoppage turns this into clean intervals.
+Un Viterbi de dos estats amb un cost per entrar/sortir d'una aturada ho converteix en intervals
+nets.
 """
 
 import numpy as np
@@ -24,16 +28,17 @@ import pandas as pd
 from solution.params import Params
 from solution.viterbi import viterbi
 
-FORCED = 1e3  # evidence large enough that no switch cost can overrule it
+FORCED = 1e3  # indici prou gran perquè cap cost de canvi el pugui contradir
 
 
 def speed_threshold(values):
-    """Reference speed for "slower than usual": the median of the half, NaN ignored.
+    """Velocitat de referència per a "més lent del normal": la mediana de la part, sense NaN.
 
-    Not a split between two populations -- on the real match the smoothed collective speed is a
-    single skewed hump (diagnose.py), so any two-class cut such as Otsu lands in the bulk of play
-    and calls most of the match dead. The median only says "slower than this half's typical
-    pace", which is why speed is weak evidence and the ball's own motion decides.
+    No és una separació entre dues poblacions -- al partit real la velocitat col·lectiva suavitzada
+    és una única gepa asimètrica (diagnose.py), de manera que qualsevol tall en dues classes com
+    Otsu cau enmig del joc i declara mort la major part del partit. La mediana només diu "més lent
+    que el ritme típic d'aquesta part", i per això la velocitat és un indici feble i qui decideix és
+    el moviment de la pilota.
     """
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values)]
@@ -41,7 +46,8 @@ def speed_threshold(values):
 
 
 def ball_speed_mps(x, y, pitch, fps):
-    """Apparent ball speed between consecutive frames, m/s. NaN if either frame lacks the ball."""
+    """Velocitat aparent de la pilota entre frames consecutius, en m/s. NaN si en algun dels dos
+    frames no hi ha pilota."""
     length, width = pitch
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -52,7 +58,7 @@ def ball_speed_mps(x, y, pitch, fps):
 
 
 def ball_moving(x, y, pitch, fps, window_s=1.0, min_m=2.0):
-    """True where the ball, seen inside the pitch now and `window_s` ago, travelled > min_m."""
+    """True on la pilota, vista dins del camp ara i fa `window_s` segons, ha recorregut > min_m."""
     length, width = pitch
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -68,8 +74,8 @@ def ball_moving(x, y, pitch, fps, window_s=1.0, min_m=2.0):
 
 
 def detect_restart(ball_speed, start, end, kick_speed=3.0, n_frames=3):
-    """First frame in [start, end) where the ball moves faster than `kick_speed` for `n_frames`
-    frames running -- the kick that restarts play. None if the window has no such frame."""
+    """Primer frame dins de [start, end) on la pilota va més ràpid que `kick_speed` durant
+    `n_frames` frames seguits -- el xut que reprèn el joc. None si la finestra no en té cap."""
     start, end = max(0, int(start)), min(len(ball_speed), int(end))
     if end - start < n_frames:
         return None
@@ -81,11 +87,12 @@ def detect_restart(ball_speed, start, end, kick_speed=3.0, n_frames=3):
 
 
 def dead_evidence(speed_smooth, threshold, x, y, pitch, params=None, moving=None):
-    """Per-frame log-odds that the ball is dead, before any set-piece information.
+    """Log-odds per frame que la pilota està morta, abans de la informació de les jugades a pilota
+    aturada.
 
-    `moving` (bool per frame, from ball_moving) marks the ball travelling inside the pitch, the
-    strongest sign of play there is: it outweighs slow players, so a patient build-up is not
-    mistaken for a stoppage.
+    `moving` (booleà per frame, de ball_moving) marca la pilota viatjant dins del camp, el senyal
+    de joc més fort que hi ha: pesa més que uns jugadors lents, de manera que una sortida pausada
+    no es confon amb una aturada.
     """
     p = params or Params()
     length, width = pitch
@@ -97,11 +104,11 @@ def dead_evidence(speed_smooth, threshold, x, y, pitch, params=None, moving=None
     evidence = evidence + p.w_oob * out
     if moving is not None:
         evidence = evidence - p.w_move * np.asarray(moving, dtype=bool)
-    return evidence + 0.0  # no negative zeros
+    return evidence + 0.0  # sense zeros negatius
 
 
 def smooth_speed(collective_speed, fps, params=None):
-    """Centred rolling median of the collective speed over params.speed_smooth_s seconds."""
+    """Mediana mòbil centrada de la velocitat col·lectiva sobre params.speed_smooth_s segons."""
     p = params or Params()
     window = max(1, int(round(p.speed_smooth_s * fps)) | 1)
     return (pd.Series(np.asarray(collective_speed, dtype=float))
@@ -117,11 +124,12 @@ def _is_kickoff_start(event):
 
 
 def dead_mask(collective_speed, x, y, blocks, events, pitch, fps, params=None):
-    """Boolean array: True where the ball is judged out of play. Only graded blocks are decided.
+    """Array booleà: True on es considera que la pilota és fora de joc. Només es decideixen els
+    blocs puntuats.
 
-    `blocks` is [(half, first_frame, last_frame)] with last inclusive, as
-    games.half_video_blocks() returns it. `events` is the Smart Tagging list from
-    starter/load_smart_tagging.load(), or None to run without it.
+    `blocks` és [(half, first_frame, last_frame)] amb l'últim inclòs, tal com el retorna
+    games.half_video_blocks(). `events` és la llista de Smart Tagging de
+    starter/load_smart_tagging.load(), o None per funcionar sense.
     """
     p = params or Params()
     n = len(collective_speed)
@@ -147,9 +155,10 @@ def dead_mask(collective_speed, x, y, blocks, events, pitch, fps, params=None):
             restart = detect_restart(ball_speed, max(begin, first), min(end, stop),
                                      p.kick_speed_mps, p.kick_frames)
             if _is_kickoff_start(event):
-                # Before the kick (or, if it was not found, before the window): no play yet.
-                # Clamped: the first half is graded from the kick-off itself, so its window
-                # starts before the block and a negative slice end would cover the whole half.
+                # Abans del xut (o, si no s'ha trobat, abans de la finestra): encara no hi ha joc.
+                # Limitat a 0: la primera part es puntua des del mateix xut inicial, així que la
+                # seva finestra comença abans del bloc i un final de llesca negatiu cobriria tota
+                # la part.
                 evidence[:max(0, (restart if restart is not None else begin) - first)] = FORCED
             if restart is None:
                 continue

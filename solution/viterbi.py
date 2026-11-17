@@ -1,24 +1,25 @@
-"""Best state sequence under per-frame evidence and a cost for every change of state.
+"""La millor seqüència d'estats donats uns indicis per frame i un cost per cada canvi d'estat.
 
-This replaces the baseline's majority vote. A vote over +/-2 s smears every boundary by up to the
-window and lets a three-frame deflection flip the label if it lands at the right moment. Viterbi
-instead finds the single labelling that maximises
+Substitueix el vot per majoria del baseline. Un vot sobre +/-2 s desplaça cada límit fins a la
+mida de la finestra i deixa que un desviament de tres frames canviï l'etiqueta si cau al moment
+adequat. Viterbi, en canvi, troba l'única seqüència d'etiquetes que maximitza
 
     sum_t emissions[t, state_t]  -  sum_t switch_cost[state_{t-1}, state_t]
 
-so the switch cost is a direct, interpretable knob: "how much evidence does it take to believe
-possession changed", in units of frames of clear evidence. That is what controls the number of
-possessions, which is exactly what spellF1 grades.
+de manera que el cost de canvi és un control directe i interpretable: "quant d'indici cal per creure
+que la possessió ha canviat", en unitats de frames d'indici clar. Això és el que controla el nombre
+de possessions, que és exactament el que puntua l'spellF1.
 """
 
 import numpy as np
 
 
 def viterbi(emissions, switch_cost):
-    """Most likely path. `emissions` is (T, K) log-evidence, higher = more likely.
+    """El camí més probable. `emissions` és un log-indici (T, K): més alt = més probable.
 
-    `switch_cost` is a scalar (same cost for any change) or a (K, K) matrix with
-    cost[from, to]; the diagonal is ignored. Ties go to the lower state index, deterministically.
+    `switch_cost` és un escalar (el mateix cost per a qualsevol canvi) o una matriu (K, K) amb
+    cost[des_de, cap_a]; la diagonal s'ignora. Els empats van a l'estat d'índex més baix, de forma
+    determinista.
     """
     emissions = np.asarray(emissions, dtype=float)
     n_frames, n_states = emissions.shape
@@ -35,7 +36,7 @@ def viterbi(emissions, switch_cost):
     score = emissions[0].copy()
     back[0] = np.arange(n_states)
     for t in range(1, n_frames):
-        candidates = score[:, None] - cost          # [from, to]
+        candidates = score[:, None] - cost          # [des_de, cap_a]
         best_from = np.argmax(candidates, axis=0)
         back[t] = best_from
         score = candidates[best_from, np.arange(n_states)] + emissions[t]

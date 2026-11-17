@@ -1,1 +1,1 @@
-"""Possession labelling pipeline (decision layer on top of the per-frame features)."""
+"""Pipeline d'etiquetatge de la possessió (capa de decisió sobre les features per frame)."""

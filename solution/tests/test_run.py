@@ -29,7 +29,7 @@ class RunTest(unittest.TestCase):
         self.assertIsNone(pm.validate_submission(pm.read_label_csv(path), len(labels)))
 
     def test_reads_the_preprocessing_notebook_csv(self):
-        # The notebook writes booleans as True/False and NaN as an empty cell.
+        # El notebook escriu els booleans com a True/False i els NaN com una cel·la buida.
         path = os.path.join(self.tmp, "features.csv")
         with open(path, "w") as handle:
             handle.write("frame,ball_visible,ball_x_norm,home_nearest_m\n"

@@ -161,6 +161,20 @@ The notebooks additionally want `kloppy` and `matplotlib` (`requirements-starter
 
 ---
 
+## Reproducing our submission (The goats)
+
+```bash
+pip install -r requirements-lock.txt
+python -m jupyter nbconvert --to notebook --execute solution/preprocessing.ipynb --output-dir data/processed
+python solution/run.py --name "The goats"     # writes evaluation/results/The goats.csv and validates it
+```
+
+The preprocessing notebook writes the per-frame feature table to `data/processed/` (private,
+git-ignored); `solution/run.py` decides `H` / `A` / `D` / `X` from it. How and why:
+[TECHNICAL.md](TECHNICAL.md).
+
+---
+
 ## Timeline
 
 | |                |
