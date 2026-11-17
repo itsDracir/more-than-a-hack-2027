@@ -57,19 +57,39 @@ def ball_speed_mps(x, y, pitch, fps):
     return speed
 
 
+# Llindars físics de ball_moving (de Marc), no ajustats amb el ground truth.
+MIN_STEP_M = 0.04       # 4 cm entre frames (1 m/s): per sota és el tremolor d'una pilota aturada
+MAX_STEP_MPS = 45.0     # cap xut no hi arriba: un salt més ràpid és un error del tracker
+MIN_VALID_SHARE = 0.70  # part dels passos de la finestra que s'han de veure per poder dir "es mou"
+
+
 def ball_moving(x, y, pitch, fps, window_s=1.0, min_m=2.0):
-    """True on la pilota, vista dins del camp ara i fa `window_s` segons, ha recorregut > min_m."""
+    """True on la pilota, vista dins del camp, ha *recorregut* més de `min_m` en `window_s`.
+
+    Es compta la distància recorreguda (la suma dels passos entre frames), no el desplaçament net:
+    una paret o una conducció que torna enrere es mou encara que acabi on havia començat. Per no
+    sumar soroll, els passos de menys de 4 cm no compten (el tremolor del tracker amb la pilota
+    aturada: al partit real, la mediana és de 0,7 cm) i els de més de 45 m/s es descarten com a
+    errors. Cal veure com a mínim el 70% dels passos de la finestra i la pilota dins del camp en el
+    frame actual. Que el tracker perdi la pilota mai no és, per si sol, indici d'aturada.
+    """
     length, width = pitch
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
+    n = len(x)
     lag = max(1, int(round(window_s * fps)))
-    moving = np.zeros(len(x), dtype=bool)
-    if len(x) <= lag:
+    moving = np.zeros(n, dtype=bool)
+    if n <= lag:
         return moving
     with np.errstate(invalid="ignore"):
-        inside = (x >= 0) & (x <= 1) & (y >= 0) & (y <= 1)
-        distance = np.hypot((x[lag:] - x[:-lag]) * length, (y[lag:] - y[:-lag]) * width)
-        moving[lag:] = inside[lag:] & inside[:-lag] & (distance > min_m)
+        inside = np.isfinite(x) & np.isfinite(y) & (x >= 0) & (x <= 1) & (y >= 0) & (y <= 1)
+        steps = np.hypot(np.diff(x) * length, np.diff(y) * width)
+        valid = inside[:-1] & inside[1:] & np.isfinite(steps) & (steps * fps <= MAX_STEP_MPS)
+    travelled = np.r_[0.0, np.cumsum(np.where(valid & (steps >= MIN_STEP_M), steps, 0.0))]
+    seen = np.r_[0, np.cumsum(valid.astype(np.int64))]
+    window_m = travelled[lag:] - travelled[:-lag]
+    window_seen = (seen[lag:] - seen[:-lag]) / lag
+    moving[lag:] = inside[lag:] & (window_seen >= MIN_VALID_SHARE) & (window_m > min_m)
     return moving
 
 

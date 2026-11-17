@@ -7,9 +7,10 @@
 Per-frame labelling (`H` / `A` / `D` / `X`) is treated as a **segmentation** problem, because the
 ranking metric (`spellF1`) grades whole possessions, not frames. The pipeline has two layers:
 
-1. **Features** (`solution/preprocessing.ipynb`). One streaming pass over the tactical ATD writes a
-   per-frame table: ball position, distance from the ball to the nearest home and nearest away
-   player, and the Smart Tagging intervals. No labels, no model.
+1. **Features** (`solution/01_preprocessing.ipynb`). One streaming pass over the tactical ATD writes
+   a per-frame table: ball position, distance from the ball to the nearest home and nearest away
+   player, mean speed of each team, and the Smart Tagging intervals; the `SET PIECES` intervals also
+   go to a JSON file. No labels, no model. This is the only step that reads the raw data.
 2. **Decisions** (`solution/*.py`). Two questions, answered in order, each with a Viterbi decoder:
    *is the ball in play?* (`deadball.py`) and, where it is, *which team has it?* (`teams.py`).
 
@@ -24,7 +25,7 @@ Per frame, a log-odds score for "dead" is the sum of:
 
 | evidence | weight | why |
 |---|---|---|
-| ball travelling > 2 m in 1 s, inside the pitch | −2.0 | the strongest sign of play: slower than any pass, faster than tracker jitter on a parked ball |
+| ball covering > 2 m of path in 1 s, inside the pitch | −2.0 | the strongest sign of play: slower than any pass, far above tracker jitter on a parked ball. Path, not net displacement, so a one-two or a dribble that turns back still counts; steps under 4 cm are ignored as jitter and jumps over 45 m/s as tracker glitches |
 | ball seen beyond a line by > 0.5 m | +3.0 | out is out |
 | collective player speed vs the half's median (2 s rolling median) | ±0.5 | weak: slow possession play is as slow as a stoppage (see *Diagnostics*) |
 | inside a Smart Tagging `SET PIECES` window, before the detected kick | +1.5 | a restart ends a stoppage |
@@ -53,10 +54,10 @@ Each change of possession is then **moved to the new team's first touch** after 
 last one. Between the two the ball is loose or in the air and Viterbi is indifferent; the ground
 truth keeps a loose ball with the last team, and one second late costs a third of `spellF1`.
 
-### Team speed (`team_speed.py`)
+### Team speed (preprocessing notebook)
 
-The only signal not in the feature table: mean speed of each team's tracked players per frame,
-read once from the raw ATD (speeds clipped to 12 m/s) and cached.
+Mean speed of each team's tracked players per frame, computed in the same pass over the raw ATD as
+the rest of the features (speeds clipped to 0-12 m/s, NaN when a team has no tracked player).
 
 ## Assets used
 
@@ -93,6 +94,26 @@ how the one design change during development was made:
   in 26–29 % of the "dead" frames**, which a real stoppage almost never shows (slow build-up play).
 - Fix: ball motion became the main sign of play and speed weak evidence relative to the median.
 
+Three later changes proposed by a teammate were decided the same way, with acceptance criteria
+written down **before** running a GT-free A/B comparison on the full match (each change alone
+against our version; aggregates only):
+
+| change | criterion | full-match result | decision |
+|---|---|---|---|
+| ball motion as path length instead of net displacement | reject if it calls a parked ball (< 30 cm net in 1 s) moving more than 5 % of the time | 1.8 % (median jitter of a parked ball: 0.7 cm per frame); 0.38 % of graded frames change | **adopted** |
+| restart kick only after the ball is seen stationary (≤ 1 m/s) | adopt if it finds ≥ 80 % of the kicks our detector finds, per set-piece type | **0 of 59** windows, against 58: the tracked ball accelerates over several frames, so a speed between 1 and 3 m/s always precedes the first fast frame | rejected |
+| offensive Smart Tagging phases as weak team evidence (weight 0.04) | leave out if it changes < 0.5 % of graded frames | 0.15 % | left out |
+
+After adopting the path-length criterion the public window went from `spellF1` 0.520 to 0.428: one
+more pair of possessions merged (13 → 12 against 17). One merge out of 17 possessions is within the
+noise of that sample, and choosing by it is what RULES.md forbids, so it did not decide anything. It
+did suggest a mechanism worth checking without ground truth: path length could count a ball
+*handled during a stoppage* (picked up, bounced, rolled to the taker) as play. Criterion, fixed
+before looking: revert if the extra motion the new criterion adds before restart kicks (ball dead
+by definition) is at least as large as elsewhere. Result: **−0.1 points** before kicks (1,074
+visible frames) against **+3.3 points** outside set-piece windows (62,615 frames). The extra motion
+is play, not handling, and the change stays.
+
 For transparency: the public window's confusion matrix of the first version also showed the
 over-prediction of `D`. The fix was designed and confirmed on the full-match diagnostics above; no
 parameter value was chosen by comparing public-window scores.
@@ -116,22 +137,23 @@ parameter value was chosen by comparing public-window scores.
 
 | | spellF1 | macroF1 | possessions | mean duration |
 |---|---|---|---|---|
-| **this solution** | **0.5200** | **0.7565** | 13 | 21.0 s |
+| **this solution** | **0.4276** | **0.7298** | 12 | 23.2 s |
 | baseline_smooth125 | 0.4242 | 0.5812 | 16 | 18.5 s |
 | baseline_smooth50 (published floor on full match: 0.2433) | 0.3256 | 0.6207 | 26 | 10.8 s |
 | ground truth | | | 17 | 14.2 s |
 
-Transition latency +0.2 frames on average; home-share error 0.005.
+Transition latency −4.7 frames on average; home-share error 0.003. With the previous ball-motion
+criterion: 0.5200 / 0.7565, 13 possessions (see *Diagnostics*).
 
 **Full match, without ground truth:**
 
 | | 1st half | 2nd half |
 |---|---|---|
-| frames called dead | 38.5 % | 42.9 % |
-| ball moving inside the pitch during dead frames | 0.2 % | 4.7 % |
-| ball moving inside the pitch during play frames | 70.4 % | 73.7 % |
+| frames called dead | 38.1 % | 42.7 % |
+| ball moving inside the pitch during dead frames | 0.3 % | 4.8 % |
+| ball moving inside the pitch during play frames | 73.1 % | 76.8 % |
 
-242 possessions, mean 15.5 s; home share 60.9 %.
+241 possessions, mean 15.6 s; home share 60.9 %.
 
 ## Limitations
 
@@ -140,7 +162,7 @@ Transition latency +0.2 frames on average; home-share error 0.005.
 - The Smart Tagging has only 59 set pieces (5 free kicks, every throw-in without a team), far fewer
   than the restarts in a match, so many restarts get no kick detection.
 - Nearest-player is a poor proxy in duels, crowded boxes and under long balls.
-- On the public window we predict 13 possessions against 17: some are merged, probably across short
+- On the public window we predict 12 possessions against 17: some are merged, probably across short
   stoppages or quick turnovers.
 - The parameters are reasoned, not validated on labelled data from other games.
 - A goalkeeper holding the ball with slow players around can look like a stoppage.
@@ -156,11 +178,11 @@ Python 3.12.10. The match data unpacked so that `data/tactical/BAR-ATH_tactical_
 
 ```bash
 pip install -r requirements-lock.txt
-python -m jupyter nbconvert --to notebook --execute solution/preprocessing.ipynb --output-dir data/processed
+python -m jupyter nbconvert --to notebook --execute solution/01_preprocessing.ipynb --output-dir data/processed
 python solution/run.py --name "The goats"     # writes evaluation/results/The goats.csv and validates it
 python solution/diagnose.py                   # optional: the dead-ball diagnostics above
-python -m unittest discover -s solution/tests -t .   # 38 tests
+python -m unittest discover -s solution/tests -t .   # 42 tests
 ```
 
-The executed notebook and the feature table go to `data/processed/`, which git ignores, so no match
-data ends up in the repository. The pipeline has no randomness: the same data gives the same file.
+The executed notebook, the feature table and the set-piece JSON go to `data/processed/`, which git
+ignores, so no match data ends up in the repository. The pipeline has no randomness: the same data gives the same file.

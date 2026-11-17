@@ -106,10 +106,9 @@ def print_report(half, report):
 
 def main():
     import games
-    from solution.run import (DEFAULT_FEATURES, add_team_speeds, load_events,
-                              load_features)
+    from solution.run import DEFAULT_FEATURES, load_events, load_features
     n_frames = games.source_frames("tactical")
-    features = add_team_speeds(load_features(DEFAULT_FEATURES, n_frames), n_frames)
+    features = load_features(DEFAULT_FEATURES, n_frames)
     events = load_events()
     pitch = games.GAMES[games.GAME]["pitch"]
     fps = games.GAMES[games.GAME]["fps"]

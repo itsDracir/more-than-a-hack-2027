@@ -3,14 +3,14 @@ pipeline.
 
 Contracte amb el constructor de features (el notebook de preprocessament, o qualsevol
 possession.py que el substitueixi): un DataFrame amb una fila per frame de vídeo 0..N-1, en
-ordre, amb aquestes columnes. Els noms coincideixen amb solution/preprocessing.ipynb, així que el
-seu CSV s'hi connecta sense canvis.
+ordre, amb aquestes columnes. Els noms coincideixen amb solution/01_preprocessing.ipynb, així que
+el seu CSV s'hi connecta sense canvis.
 
     ball_x_norm, ball_y_norm      posició de la pilota, coordenades 0-1 del camp, NaN si no es veu
     home_nearest_m                distància pilota -> jugador local més proper (m), NaN si es desconeix
     away_nearest_m                distància pilota -> jugador visitant més proper (m), NaN si es desconeix
-    home_mean_speed_mps           velocitat mitjana dels jugadors locals seguits (m/s)    } vegeu
-    away_mean_speed_mps           velocitat mitjana dels jugadors visitants seguits (m/s) } team_speed.py
+    home_mean_speed_mps           velocitat mitjana dels jugadors locals seguits (m/s)
+    away_mean_speed_mps           velocitat mitjana dels jugadors visitants seguits (m/s)
 
 Ordre de les decisions:
   1. fora de les parts puntuades              -> X (mai es puntua)

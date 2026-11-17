@@ -116,6 +116,31 @@ class BallMovingTest(unittest.TestCase):
         x = np.full(60, np.nan)
         self.assertFalse(ball_moving(x, x, PITCH, FPS).any())
 
+    def test_ball_that_goes_and_comes_back_within_a_second_is_moving(self):
+        # Una paret: 1,5 m d'anada i 1,5 m de tornada en mig segon. El desplaçament net és zero,
+        # però la pilota ha recorregut 3 m.
+        x = np.full(100, 0.5)
+        step = 0.25 / PITCH[0]
+        x[30:36] = 0.5 + step * np.arange(1, 7)
+        x[36:42] = 0.5 + step * np.arange(5, -1, -1)
+        y = np.full(100, 0.5)
+        moving = ball_moving(x, y, PITCH, FPS)
+        self.assertTrue(moving[42:56].all())
+        self.assertFalse(moving[:30].any())
+
+    def test_jitter_of_a_parked_ball_is_not_movement(self):
+        # Pilota aturada que el tracker fa tremolar 3 cm amunt i avall cada frame.
+        x = 0.5 + (0.015 / PITCH[0]) * (-1.0) ** np.arange(100)
+        y = np.full(100, 0.5)
+        self.assertFalse(ball_moving(x, y, PITCH, FPS).any())
+
+    def test_single_frame_tracking_glitch_is_not_movement(self):
+        # Un salt de 3 m durant un sol frame (75 m/s): error del tracker, no una pilota que es mou.
+        x = np.full(100, 0.5)
+        x[60] = 0.5 + 3.0 / PITCH[0]
+        y = np.full(100, 0.5)
+        self.assertFalse(ball_moving(x, y, PITCH, FPS).any())
+
 
 class SlowPossessionTest(unittest.TestCase):
     """Troballa del partit real (diagnose.py): la velocitat col·lectiva és unimodal, i el joc de

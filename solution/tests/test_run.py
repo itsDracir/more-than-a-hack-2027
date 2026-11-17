@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import sys
@@ -7,8 +8,10 @@ import unittest
 import numpy as np
 import pandas as pd
 
+import games
+from solution.labeling import REQUIRED_COLUMNS
 from solution.run import ROOT as REPO_ROOT
-from solution.run import display_path, load_features, main, write_submission
+from solution.run import display_path, load_events, load_features, main, write_submission
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "evaluation"))
@@ -58,9 +61,57 @@ class RunTest(unittest.TestCase):
         with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(printed):
             code = main(["--name", "t", "--features", missing, "--out", self.tmp])
         self.assertEqual(code, 2)
-        self.assertIn("preprocessing.ipynb", printed.getvalue())
+        self.assertIn("01_preprocessing.ipynb", printed.getvalue())
         self.assertIn("nope.csv", printed.getvalue())
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "t.csv")))
+
+    def run_main(self, columns, events=None):
+        """Executa main() amb una taula sintètica d'un frame per fila i retorna (codi, text)."""
+        import contextlib
+        import io
+        n = games.source_frames("tactical")
+        features = os.path.join(self.tmp, "features.csv")
+        pd.DataFrame({"frame": np.arange(n), **{c: np.nan for c in columns}}).to_csv(
+            features, index=False)
+        args = ["--name", "t", "--features", features, "--out", self.tmp]
+        if events is not None:
+            args += ["--events", events]
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(printed):
+            code = main(args)
+        return code, printed.getvalue()
+
+    def test_features_without_team_speeds_say_to_rerun_the_notebook(self):
+        # Les velocitats per equip les calcula el notebook en la mateixa lectura de l'ATD; run.py
+        # ja no torna a llegir el tracking en brut.
+        code, printed = self.run_main(["ball_x_norm", "ball_y_norm"])
+        self.assertEqual(code, 2)
+        self.assertIn("home_mean_speed_mps", printed)
+        self.assertIn("01_preprocessing.ipynb", printed)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "t.csv")))
+
+    def test_missing_set_piece_file_says_to_rerun_the_notebook(self):
+        code, printed = self.run_main(REQUIRED_COLUMNS,
+                                      events=os.path.join(self.tmp, "no_events.json"))
+        self.assertEqual(code, 2)
+        self.assertIn("no_events.json", printed)
+        self.assertIn("01_preprocessing.ipynb", printed)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "t.csv")))
+
+    def test_reads_the_set_piece_intervals_written_by_the_notebook(self):
+        intervals = [{"code": "SET PIECES", "start_frame": 10, "end_frame": 135,
+                      "tags": {"Type": "Kick Off (Start)"}}]
+        path = os.path.join(self.tmp, "events.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(intervals, handle)
+        self.assertEqual(load_events(path), intervals)
+
+    def test_rejects_set_piece_intervals_with_missing_fields(self):
+        path = os.path.join(self.tmp, "events.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump([{"code": "SET PIECES", "start_frame": 10}], handle)
+        with self.assertRaises(ValueError):
+            load_events(path)
 
     def test_rejects_features_that_do_not_cover_every_frame(self):
         path = os.path.join(self.tmp, "features.csv")

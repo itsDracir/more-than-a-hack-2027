@@ -22,9 +22,10 @@ class Params:
     # tan lent com una aturada.
     speed_scale_frac: float = 0.15
     w_speed: float = 0.5
-    # La pilota que recorre més de move_min_m en move_window_s, dins del camp, és joc.
-    # 2 m en 1 s és més lent que qualsevol passada i més ràpid que el tremolor del tracker sobre
-    # una pilota aturada. Pesa més que uns jugadors lents (w_move > w_speed), que és la gràcia.
+    # La pilota que recorre més de move_min_m en move_window_s, dins del camp, és joc. Es compta la
+    # distància recorreguda, no el desplaçament net (vegeu deadball.ball_moving). 2 m en 1 s és més
+    # lent que qualsevol passada i molt més que el tremolor del tracker sobre una pilota aturada.
+    # Pesa més que uns jugadors lents (w_move > w_speed), que és la gràcia.
     move_window_s: float = 1.0
     move_min_m: float = 2.0
     w_move: float = 2.0
